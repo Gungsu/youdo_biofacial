@@ -51,7 +51,7 @@ interfaceRede = "eth0"  # Defina a interface de rede padrão aqui
 interfaceVPN = "wg1" # Defina a interface de rede da VPN aqui
 
 #MongoDB connection details
-MONGO_HOST = '192.200.101.1'
+MONGO_HOST = '192.168.101.1'
 
 MONGO_PORT = 27017
 DATABASE_NAME = 'biofacial'
