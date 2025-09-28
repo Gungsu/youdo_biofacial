@@ -1,0 +1,26 @@
+[Unit]
+Description=Serviço de Inicialização do App YouDo
+After=network.target
+
+[Service]
+# Usuário sob o qual o serviço deve rodar
+User=root
+Group=root
+
+# Define o diretório de trabalho (onde seu script principal está)
+WorkingDirectory=/root/youdo_biofacial/
+
+# O comando que será executado: o Python do VENV rodando seu script principal.
+ExecStart=/root/.mrdvenv/bin/python /root/youdo_biofacial/APILocal_2_1.py
+
+# Reinicia o serviço se ele falhar (mantém o serviço ativo)
+Restart=always
+
+# Tipo de reinício (evita reinícios muito rápidos em caso de falha)
+RestartSec=5
+
+# Variáveis de ambiente (se necessário, como a porta do servidor)
+#Environment="PORTA_SERVER=3001"
+
+[Install]
+WantedBy=multi-user.target
