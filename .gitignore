@@ -1,0 +1,5 @@
+# Ignora a pasta de cache do Python
+__pycache__/
+
+# Opcional: Ignora todos os arquivos bytecode compilados (.pyc)
+*.pyc

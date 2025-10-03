@@ -19,6 +19,7 @@ import re, time
 import subprocess
 import requests as RQfunction
 import sys
+import vpnactions as vpn
 from pathlib import Path
 from colorama import Fore, Style, init
 from datetime import datetime, timezone
@@ -48,14 +49,15 @@ templates = Jinja2Templates(directory=str(Path(BASE_DIR, 'templates')))
 
 softwareVersion = "2.1.0"
 interfaceRede = "eth0"  # Defina a interface de rede padrão aqui
-interfaceVPN = "wg1" # Defina a interface de rede da VPN aqui
+interfaceVPN = "wg0" # Defina a interface de rede da VPN aqui
+
+WIREGUARD_CONF_PATH = Path('/etc/wireguard/wg0.conf')
 
 #MongoDB connection details
 MONGO_HOST = '192.168.101.1'
 
 MONGO_PORT = 27017
 DATABASE_NAME = 'biofacial'
-COLLECTION_NAME = 'usuarios' # Replace with your actual collection name
 LOGCOLLECTION_NAME = 'logsCent_2_1'
 COLLECTION_EQ_NAME = 'equipamentos_2_1'
 
@@ -462,6 +464,7 @@ class Equipament(BaseModel):
     ## Usado apenas para enviar log de entrada para o endPoint
     last_userLog: Optional[str] = None
     ipFs: Optional[str] = None
+    nipVPN: Optional[str] = None
 
 @app.post("/cadListClientes")
 async def cadListClientes(soli: clientList):
@@ -972,6 +975,78 @@ async def del_cadastro_cl(soli: Client):
         resp.append(myResp)
         await bdLog("ERROR","del_cl_2_1",soli.model_dump())
         return respPadrao("ERROR",resp)
+    
+@app.post("/generate_wg_key")
+async def generate_wg_key(request: Request, soli: Equipament):
+    """
+    Gera um novo par de chaves WireGuard, atualiza o wg0.conf
+    com o novo IP e reinicia o serviço.
+    """
+    # 1. Geração de novo par de chaves publica e privada
+    private_key, public_key = vpn.generate_wireguard_keys()
+    
+    if not private_key:
+        await bdLog("ERROR", "/generate_wg_key", "Falha ao gerar par de chaves.")
+        return respPadrao("ERROR", "Falha ao gerar par de chaves WireGuard.")
+
+    # Dados da requisição
+    novo_ip_cidr = soli.nipVPN + "/24" # Adiciona o /24 ao IP fornecido
+
+    # 2. Responder a solicitação do endPoint com a nova chave publica (antes de alterar o arquivo)
+    response_data = {
+        "new_public_key": public_key,
+        "new_server_ip": novo_ip_cidr,
+        "status": "Aguardando reinício do serviço..."
+    }
+
+    # 3. Alterar o arquivo wg0.conf
+    try:
+        # Lendo o arquivo atual
+        if not WIREGUARD_CONF_PATH.exists():
+            await bdLog("ERROR", "/generate_wg_key", f"Arquivo de configuração não encontrado: {WIREGUARD_CONF_PATH}")
+            return respPadrao("ERROR", f"Arquivo de configuração não encontrado: {WIREGUARD_CONF_PATH}")
+            
+        conf_content = WIREGUARD_CONF_PATH.read_text()
+        
+        # --- Lógica de Substituição ---
+        
+        # 3a. Substituir a PrivateKey da Interface
+        # Regex para encontrar "PrivateKey = [CHAVE ANTIGA]" e substituir.
+        conf_content = re.sub(
+            r'^PrivateKey\s*=\s*.*$', 
+            f'PrivateKey = {private_key}', 
+            conf_content, 
+            flags=re.MULTILINE
+        )
+        
+        # 3b. Substituir o Address da Interface pelo novo IP
+        conf_content = re.sub(
+            r'^Address\s*=\s*.*$', 
+            f'Address = {novo_ip_cidr}', 
+            conf_content, 
+            flags=re.MULTILINE
+        )
+              
+        # Salvando o backup (melhor prática)
+        backup_path = WIREGUARD_CONF_PATH.with_suffix('.conf.bak')
+        WIREGUARD_CONF_PATH.rename(backup_path)
+        
+        # Escrevendo o novo arquivo
+        WIREGUARD_CONF_PATH.write_text(conf_content)
+        
+    except Exception as e:
+        await bdLog("ERROR", "/generate_wg_key", f"Falha ao modificar/salvar o arquivo wg0.conf: {e}")
+        response_data["status"] = f"ERRO ao salvar arquivo: {e}. Verifique permissões."
+        return respPadrao("ERROR", response_data)
+
+    # 4. Reiniciar o serviço wireguard
+    if vpn.restart_wireguard_service():
+        response_data["status"] = "SUCESSO: Chave atualizada e serviço reiniciado."
+    else:
+        response_data["status"] = "AVISO: Chave atualizada, mas falha ao reiniciar o serviço."
+    
+    await bdLog("PUT", "/generate_wg_key", soli.model_dump())
+    return respPadrao("SUCCESS", response_data)
 
 if __name__ == '__main__':
     print("Software inicializado... - Listening")
