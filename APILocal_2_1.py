@@ -984,6 +984,7 @@ async def generate_wg_key(request: Request, soli: Equipament):
     """
     # 1. Geração de novo par de chaves publica e privada
     private_key, public_key = vpn.generate_wireguard_keys()
+    makeResp = [{}]
     
     if not private_key:
         await bdLog("ERROR", "/generate_wg_key", "Falha ao gerar par de chaves.")
@@ -1037,16 +1038,30 @@ async def generate_wg_key(request: Request, soli: Equipament):
     except Exception as e:
         await bdLog("ERROR", "/generate_wg_key", f"Falha ao modificar/salvar o arquivo wg0.conf: {e}")
         response_data["status"] = f"ERRO ao salvar arquivo: {e}. Verifique permissões."
-        return respPadrao("ERROR", response_data)
+        makeResp.append(response_data)
+        return respPadrao("ERROR", makeResp)
 
     # 4. Reiniciar o serviço wireguard
-    if vpn.restart_wireguard_service():
-        response_data["status"] = "SUCESSO: Chave atualizada e serviço reiniciado."
-    else:
-        response_data["status"] = "AVISO: Chave atualizada, mas falha ao reiniciar o serviço."
+    #if vpn.restart_wireguard_service():
+    response_data["status"] = "SUCESSO: Chave atualizada e solicite reiniciar o serviço reiniciado."
     
     await bdLog("PUT", "/generate_wg_key", soli.model_dump())
-    return respPadrao("SUCCESS", response_data)
+    makeResp.append(response_data)
+    return respPadrao("SUCCESS", makeResp)
+
+@app.get("/restart_wg_service")
+async def restart_wg_key(request: Request, soli: Equipament):
+    makeResp = [{}]
+    if vpn.restart_wireguard_service():
+        response_data = {"status": "SUCESSO: Serviço WireGuard reiniciado."}
+        await bdLog("PUT", "/restart_wg_service", soli.model_dump())
+        makeResp.append(response_data)
+        return respPadrao("SUCCESS", response_data)
+    else:
+        response_data = {"status": "ERRO: Falha ao reiniciar o serviço WireGuard."}
+        await bdLog("ERROR", "/restart_wg_service", soli.model_dump())
+        makeResp.append(response_data)
+        return respPadrao("ERROR", response_data)
 
 if __name__ == '__main__':
     print("Software inicializado... - Listening")
