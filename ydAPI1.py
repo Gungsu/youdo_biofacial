@@ -91,6 +91,7 @@ def payLogin(host):
     ]
 
     response = None
+    bool_setWeb = 0
     for url in urls_para_tentar:
         try:
             #print(f"INFO: Tentando conectar em {url}...")
@@ -101,6 +102,7 @@ def payLogin(host):
                 hostG = f"{host_ip}:85"
             else:
                 hostG = host_ip
+                bool_setWeb = 1
             break
 
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
@@ -109,18 +111,22 @@ def payLogin(host):
     
     # Se, após o loop, a 'response' continuar nula, significa que todas as tentativas falharam.
     if response is None:
-        #print(f"ERRO: Não foi possível estabelecer conexão com o host {host_ip} em nenhuma das portas (80, 85).")
+        print(f"ERRO: Não foi possível estabelecer conexão com o host {host_ip} em nenhuma das portas (80, 85).")
         return 0
 
     try:
         json_conv = response.json() # Forma mais limpa de carregar o JSON
         if 'session' in json_conv:
             mySession = json_conv['session']
+            #print("INFO: Login bem-sucedido.")
+            if bool_setWeb == 1:
+                setwebaccess(host, "0")
             return 1
         else:
             payLoginOLD(host)
             changePassword(host, PASS_1)
-            setwebaccess(host, "0")
+            if bool_setWeb == 1:
+                setwebaccess(host, "0")
             print("INFO: Credenciais inválidas. A senha foi redefinida para o padrão.")
             return 2
         

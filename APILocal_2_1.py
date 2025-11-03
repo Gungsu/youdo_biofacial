@@ -79,7 +79,7 @@ async def lifespan(app: FastAPI):
     if local_info:
         MEUIPLOCAL = local_info.get('ip', MEUIPLOCAL) # Usa o valor antigo como fallback
         MEUMAC = local_info.get('mac', MEUMAC)
-        print(f"{COR_VERDE}INFO:{RESET_COR}     Rede Local: IP {MEUIPLOCAL}, MAC {MEUMAC}")
+        #print(f"{COR_VERDE}INFO:{RESET_COR}     Rede Local: IP {MEUIPLOCAL}, MAC {MEUMAC}")
     
     print(f"{COR_VERDE}INFO:{RESET_COR}     Iniciando a aplicação e conectando ao MongoDB...")
     try:
@@ -247,6 +247,7 @@ async def bdLog(strType = "0",strFrom = "API_Local_2_1",strMsg = None):
 async def status(request: Request):
     """
     Endpoint para verificar o status da API.
+    Atualiza os dados da central no MongoDB.
 
     Retorna:
         dict: Um dicionário com a chave 'status' e o valor 'API is running'.
