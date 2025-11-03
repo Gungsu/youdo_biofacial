@@ -63,15 +63,23 @@ COLLECTION_EQ_NAME = 'equipamentos_2_1'
 
 MEUIPVPN = "200.200.200.200" # Atualiza quando inicia
 PORT = 557
+MEUMAC = "00:00:00:00:00:00"
+MEUIPLOCAL = "200.200.200.200"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Código executado na inicialização da API
     # Verificando minhas configurações de rede
-    global MEUIPVPN
+    global MEUIPVPN, MEUIPLOCAL, MEUMAC
     
     local_ip = await asyncio.to_thread(find_vpn_info_by_ip_range, MONGO_HOST+"/24")
     print("INFO: Verificando configurações de rede...")
     MEUIPVPN = local_ip['ip']
+    
+    local_info = await asyncio.to_thread(get_network_info, interfaceRede) 
+    if local_info:
+        MEUIPLOCAL = local_info.get('ip', MEUIPLOCAL) # Usa o valor antigo como fallback
+        MEUMAC = local_info.get('mac', MEUMAC)
+        print(f"{COR_VERDE}INFO:{RESET_COR}     Rede Local: IP {MEUIPLOCAL}, MAC {MEUMAC}")
     
     print(f"{COR_VERDE}INFO:{RESET_COR}     Iniciando a aplicação e conectando ao MongoDB...")
     try:
@@ -236,15 +244,55 @@ async def bdLog(strType = "0",strFrom = "API_Local_2_1",strMsg = None):
 ########################## ENDPOINTS #############################
 
 @app.get("/status")
-async def status():
+async def status(request: Request):
     """
     Endpoint para verificar o status da API.
 
     Retorna:
         dict: Um dicionário com a chave 'status' e o valor 'API is running'.
     """
+    global MEUIPVPN, MEUIPLOCAL, MEUMAC
+    print (f"INFO: IP VPN: {MEUIPVPN}, Rede Local: IP {MEUIPLOCAL}, MAC {MEUMAC}")
+    print(f"INFO: Endpoint /status acessado.")
+    
+    client = None
+    try:
+        client = request.app.state.mongodb_client
+        if not client:
+            await bdLog("ERROR","statusequipamentos","Falha ao conectar ao MongoDB.")
+            return json.dumps({"error": "Falha ao conectar ao MongoDB."})
+        else:
+            db = client[DATABASE_NAME]
+            centrais_collection = db["centrais_2_1"]
+            query = {"ip_VPN": {"$regex": MEUIPVPN}}
+            update_data = {
+                "$set": {
+                    "ip_local": MEUIPLOCAL+":"+str(PORT),
+                    "mac": MEUMAC,
+                    "updatedAt": datetime.now(timezone.utc)
+                }
+            }
+            result = centrais_collection.update_one(query, update_data, upsert=False)
+            if result.matched_count > 0:
+                if result.modified_count > 0:
+                    #print("INFO: /status - Dados da central atualizados no MongoDB.")
+                    await bdLog("INFO","status","Dados da central atualizados no MongoDB.")
+                    db_update_status = "success_modified"
+                else:
+                    #print("INFO: /status - Dados da central já estavam atualizados no MongoDB.")
+                    db_update_status = "success_not_modified"
+            else:
+                #print(f"WARN: /status - Nenhuma central encontrada com ip_VPN: {MEUIPVPN}. Nenhum dado foi atualizado.")
+                await bdLog("WARN","status",f"Nenhuma central encontrada com ip_VPN: {MEUIPVPN}.")
+                db_update_status = "failed_not_found"
+        
+    except Exception as e:
+        print(f"ERROR: /status - Falha ao atualizar dados da central no MongoDB: {e}")
+        await bdLog("ERROR","status",f"Falha ao atualizar dados da central: {str(e)}")
+        db_update_status = f"failed_exception: {str(e)}"
+    
     await bdLog("STATUS","status","API is running")
-    return respPadrao("SUCCESS",{"status": "online"})
+    return respPadrao("SUCCESS",{"status": "online", "db_update": db_update_status})
 
 @app.get("/statusequipamentos")
 async def statusequipamentos(request: Request):
