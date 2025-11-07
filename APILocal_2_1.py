@@ -1025,95 +1025,85 @@ async def del_cadastro_cl(soli: Client):
         await bdLog("ERROR","del_cl_2_1",soli.model_dump())
         return respPadrao("ERROR",resp)
     
-@app.post("/generate_wg_key")
-async def generate_wg_key(request: Request, soli: Equipament):
+@app.post("/update_vpn_ip")
+async def update_vpn_ip(request: Request, soli: Equipament):
     """
-    Gera um novo par de chaves WireGuard, atualiza o wg0.conf
-    com o novo IP e reinicia o serviço.
+    Endpoint para:
+    1. Gerar um novo par de chaves WireGuard localmente.
+    2. Enviar a nova chave pública e o IP desejado para o servidor VPN registrar.
     """
-    # 1. Geração de novo par de chaves publica e privada
-    private_key, public_key = vpn.generate_wireguard_keys()
-    makeResp = [{}]
+    novo_ip_VPN = soli.nipVPN
+    SERVER_API_URL = "http://177.71.174.32:10610/add_vpn_client"
+    # --- 1. Validação de Entrada ---
+    if not novo_ip_VPN:
+        await bdLog("ERROR", "update_vpn_ip", "O campo 'nipVPN' (novo IP) é obrigatório.")
+        return respPadrao("ERROR", "O campo 'nipVPN' (novo IP) é obrigatório.")
     
-    if not private_key:
-        await bdLog("ERROR", "/generate_wg_key", "Falha ao gerar par de chaves.")
-        return respPadrao("ERROR", "Falha ao gerar par de chaves WireGuard.")
+    await bdLog("INFO", "update_vpn_ip", f"Iniciando atualização do IP da VPN para: {novo_ip_VPN}")
 
-    # Dados da requisição
-    novo_ip_cidr = soli.nipVPN + "/24" # Adiciona o /24 ao IP fornecido
-
-    # 2. Responder a solicitação do endPoint com a nova chave publica (antes de alterar o arquivo)
-    response_data = {
-        "new_public_key": public_key,
-        "new_server_ip": novo_ip_cidr,
-        "status": "Aguardando reinício do serviço..."
-    }
-
-    # 3. Alterar o arquivo wg0.conf
+    # --- 2. Gerar Chaves Localmente ---
+    # (Rodamos 'vpn.generate_wireguard_keys' em uma thread, 
+    # pois é uma operação síncrona que usa subprocess)
     try:
-        # Lendo o arquivo atual
-        if not WIREGUARD_CONF_PATH.exists():
-            await bdLog("ERROR", "/generate_wg_key", f"Arquivo de configuração não encontrado: {WIREGUARD_CONF_PATH}")
-            return respPadrao("ERROR", f"Arquivo de configuração não encontrado: {WIREGUARD_CONF_PATH}")
-            
-        conf_content = WIREGUARD_CONF_PATH.read_text()
+        private_key, public_key = await asyncio.to_thread(vpn.generate_wireguard_keys, novo_ip_VPN)
         
-        # --- Lógica de Substituição ---
-        
-        # 3a. Substituir a PrivateKey da Interface
-        # Regex para encontrar "PrivateKey = [CHAVE ANTIGA]" e substituir.
-        conf_content = re.sub(
-            r'^PrivateKey\s*=\s*.*$', 
-            f'PrivateKey = {private_key}', 
-            conf_content, 
-            flags=re.MULTILINE
-        )
-        
-        # 3b. Substituir o Address da Interface pelo novo IP
-        conf_content = re.sub(
-            r'^Address\s*=\s*.*$', 
-            f'Address = {novo_ip_cidr}', 
-            conf_content, 
-            flags=re.MULTILINE
-        )
-              
-        # Salvando o backup (melhor prática)
-        backup_path = WIREGUARD_CONF_PATH.with_suffix('.conf.bak')
-        WIREGUARD_CONF_PATH.rename(backup_path)
-        
-        # Escrevendo o novo arquivo
-        WIREGUARD_CONF_PATH.write_text(conf_content)
-        
-    except Exception as e:
-        await bdLog("ERROR", "/generate_wg_key", f"Falha ao modificar/salvar o arquivo wg0.conf: {e}")
-        response_data["status"] = f"ERRO ao salvar arquivo: {e}. Verifique permissões."
-        makeResp.append(response_data)
-        return respPadrao("ERROR", makeResp)
-
-    # 4. Reiniciar o serviço wireguard
-    #if vpn.restart_wireguard_service():
-    response_data["status"] = "SUCESSO: Chave atualizada e solicite reiniciar o serviço reiniciado."
+        if not public_key:
+            await bdLog("ERROR", "update_vpn_ip", "Falha ao gerar chaves WireGuard (função retornou None).")
+            return respPadrao("ERROR", "Falha ao gerar chaves WireGuard localmente.")
     
-    await bdLog("PUT", "/generate_wg_key", soli.model_dump())
-    makeResp.append(response_data)
-    return respPadrao("SUCCESS", makeResp)
+    except Exception as e:
+        # Isso pode acontecer se o 'wg' (WireGuard Tools) não estiver instalado
+        await bdLog("ERROR", "update_vpn_ip", f"Exceção ao gerar chaves: {e}")
+        return respPadrao("ERROR", f"Exceção ao gerar chaves: {str(e)}")
 
-@app.get("/restart_wg_service")
-async def restart_wg_key(request: Request, soli: Equipament):
-    makeResp = [{}]
-    if vpn.restart_wireguard_service():
-        response_data = {"status": "SUCESSO: Serviço WireGuard reiniciado."}
-        await bdLog("PUT", "/restart_wg_service", soli.model_dump())
-        makeResp.append(response_data)
-        return respPadrao("SUCCESS", response_data)
+    # --- 3. Enviar Chave para o Servidor ---
+    payload = {
+        "ip_vpn": novo_ip_VPN,
+        "public_key": public_key
+    }
+    
+    # (Usamos uma função wrapper para rodar o 'requests' síncrono em uma thread)
+    def request_to_server():
+        try:
+            # Usando o alias 'RQfunction' que você tem no seu APILocal_2_1.py
+            response = RQfunction.post(SERVER_API_URL, json=payload, timeout=15)
+            response.raise_for_status() # Lança um erro se o status for 4xx ou 5xx
+            return response.json()
+        except Exception as e:
+            # Captura exceções (ConnectionError, HTTPError, etc.)
+            return {"status": "exception", "message": str(e)}
+
+    await bdLog("INFO", "update_vpn_ip", f"Enviando nova chave pública para o servidor: {SERVER_API_URL}")
+    server_response = await asyncio.to_thread(request_to_server)
+
+    # --- 4. Tratar Resposta do Servidor ---
+    response_status = server_response.get("status")
+    response_message = server_response.get("message", "Resposta inválida do servidor.")
+
+    if response_status == "sucesso":
+        await bdLog("SUCCESS", "update_vpn_ip", f"IP {novo_ip_VPN} registrado com sucesso no servidor.")
+        return respPadrao("SUCCESS", server_response)
+        
+    elif response_status == "negado":
+        await bdLog("WARN", "update_vpn_ip", f"Servidor negou o IP {novo_ip_VPN} (provavelmente já existe). Msg: {response_message}")
+        return respPadrao("ERROR", response_message)
+        
+    elif response_status == "exception":
+        await bdLog("ERROR", "update_vpn_ip", f"Falha ao contatar o servidor: {response_message}")
+        return respPadrao("ERROR", f"Falha de comunicação com o servidor: {response_message}")
+
     else:
-        response_data = {"status": "ERRO: Falha ao reiniciar o serviço WireGuard."}
-        await bdLog("ERROR", "/restart_wg_service", soli.model_dump())
-        makeResp.append(response_data)
-        return respPadrao("ERROR", response_data)
-
+        await bdLog("ERROR", "update_vpn_ip", f"Resposta inesperada do servidor: {server_response}")
+        return respPadrao("ERROR", f"Resposta inesperada do servidor: {server_response}")
+    
 if __name__ == '__main__':
     print("Software inicializado... - Listening")
     time.sleep(5)
     print('Iniciando o servidor na porta:', PORT)
-    uvicorn.run(app, host='0.0.0.0', port=PORT)
+    #uvicorn.run(app, host='0.0.0.0', port=PORT)
+    uvicorn.run(
+        "APILocal_2_1:app",
+        host="0.0.0.0", # Escuta em todas as interfaces
+        port=PORT,
+        reload=True
+    )

@@ -5,8 +5,10 @@ import re
 
 WIREGUARD_CONF_PATH = Path('/etc/wireguard/wg0.conf')
 WIREGUARD_PUB_PATH = Path('/etc/wireguard/wg0_pub')
+WG_INTERFACE_NAME = 'wg0'
+WG_FILENAME = "wg0.conf"
 
-def generate_wireguard_keys():
+def generate_wireguard_keys(novo_ip_VPN):
     """Gera um novo par de chaves pública/privada do WireGuard."""
     try:
         # Gera a chave privada (wg genkey)
@@ -19,7 +21,7 @@ def generate_wireguard_keys():
         print(f"INFO: Chaves WireGuard geradas com sucesso.")
         print(f"Private Key: {private_key}")
         print(f"Public Key: {public_key}")
-        altera_wg0(private_key,public_key)
+        altera_wg0(private_key,public_key,novo_ip_VPN)
         return private_key, public_key
     except FileNotFoundError:
         print("ERRO: O comando 'wg' (WireGuard Tools) não foi encontrado.")
@@ -41,7 +43,20 @@ def restart_wireguard_service():
         print(f"ERRO: Falha ao reiniciar o serviço WireGuard: {e}")
         return False
 
-def altera_wg0(private_key,public_key):
+def stop_wireguard_service():
+    """Reinicia o serviço WireGuard ({VPCONF})."""
+    """LEMBRAR DE ALTERAR O NOME DO HOST PARA centralmrd[numero]"""
+    try:
+        # Usa 'wg-quick@{VPCONF}' para reiniciar a instância específica.
+        # Necessita de permissão de superusuário (root)
+        subprocess.run(['systemctl', 'stop', f'wg-quick@{WG_INTERFACE_NAME}'], check=True)
+        print(f"INFO: Serviço WireGuard ({WG_FILENAME}) parado com sucesso.")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"ERRO: Falha ao parar o serviço WireGuard: {e}")
+        return False
+
+def altera_wg0(private_key,public_key,novo_ip_VPN):
     makeResp = [{}]
     response_data = {
         "new_public_key": "0",
@@ -49,14 +64,7 @@ def altera_wg0(private_key,public_key):
         "status": "Aguardando reinício do serviço..."
     }
     """Para o serviço WireGuard (wg0)."""
-    try:
-        # Usa 'wg-quick@wg0' para reiniciar a instância específica.
-        # Necessita de permissão de superusuário (root)
-        subprocess.run(['sudo', 'systemctl', 'stop', 'wg-quick@wg0'], check=True)
-        print("INFO: Serviço WireGuard (wg0) parado com sucesso.")
-    except subprocess.CalledProcessError as e:
-        print(f"ERRO: Falha ao parar o serviço WireGuard: {e}")
-        return False
+    stop_wireguard_service()
     
     try:
         # Lendo o arquivo atual
@@ -77,9 +85,11 @@ def altera_wg0(private_key,public_key):
         )
         
         # 3b. Substituir o Address da Interface pelo novo IP
+        ipcom24 = f"{novo_ip_VPN}/24"
+        
         conf_content = re.sub(
             r'^Address\s*=\s*.*$', 
-            f'Address = {"192.168.101.19/24"}',
+            f'Address = {ipcom24}',
             conf_content, 
             flags=re.MULTILINE
         )
@@ -99,6 +109,7 @@ def altera_wg0(private_key,public_key):
         return "ERROR01"
 
     # 4. Reiniciar o serviço wireguard
+    restart_wireguard_service()
     #if vpn.restart_wireguard_service():
     response_data["status"] = "SUCESSO: Chave atualizada e solicite reiniciar o serviço reiniciado."
     makeResp.append(response_data)
