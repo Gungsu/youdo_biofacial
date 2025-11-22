@@ -192,7 +192,54 @@ def get_network_info(interface_name: str = None) -> Optional[dict]:
         print(f"ERRO: Ocorreu um erro inesperado: {e}")
         return None
 
+
 def listaIpEqs():
+    """
+    Varre a rede usando nmap -sn (Ping Scan), descobre hosts ativos,
+    filtra os dispositivos pelo fabricante 'Control iD', e retorna
+    uma lista de dicionários com IP e MAC.
+    """
+    
+    # --- Passo 1: Obter a Subnet ---
+    # Substitua esta linha pela sua lógica real para obter a subnet
+    # makeSubnet = get_network_info() 
+    # subnet = makeSubnet['ip'] + "/24" 
+    
+    subnet = "192.168.0.0/24" # Exemplo de subnet para teste
+
+    # --- Passo 2: Configurar e Executar o Nmap -sn ---
+    scanner = nmap.PortScanner()
+    scanner.scan(subnet, arguments='-sn') 
+    
+    # Inicializa a lista de resultados como uma lista de dicionários
+    listipeqsinlocal = []
+    
+    # --- Passo 3: Iterar, Filtrar e Extrair IP/MAC ---
+    for host in scanner.all_hosts():
+        
+        # Obtém o dicionário de fabricantes/MACs
+        fabricante_info = scanner[host].get('vendor')
+        
+        if fabricante_info:
+            
+            # Itera sobre os MACs encontrados (chaves do dicionário fabricante_info)
+            for mac_address, nome_fabricante in fabricante_info.items():
+                
+                # Verifica se o fabricante corresponde ao critério
+                if nome_fabricante == 'Control iD':
+                    
+                    # Adiciona o IP e o MAC ao formato de dicionário desejado
+                    listipeqsinlocal.append({
+                        'ip': host,
+                        'mac': mac_address
+                    })
+                    
+                    # Como um host deve ter apenas um MAC de interesse, podemos quebrar o loop interno
+                    break
+                    
+    return listipeqsinlocal
+
+def listaIpEqs_OLD():
     #subnet = mIp.ipemask()
     #loop = asyncio.get_event_loop()
     makeSubnet = get_network_info()
@@ -200,8 +247,9 @@ def listaIpEqs():
     #print(f"INFO: Subnet para varredura: {subnet}")
     #print(subnet[0])
     scanner = nmap.PortScanner()
-    scanner.scan(subnet, arguments='-sP')
-    #scanner.scan("192.168.0.0/24", arguments='-sP')
+    #scanner.scan(subnet, arguments='-sP')
+    scanner.scan("192.168.0.0/24", arguments='-sP')
+    #scanner.scan(subnet, arguments='-sn')
     listipeqsinlocal = []
     
     for host in scanner.all_hosts():
@@ -329,36 +377,82 @@ async def statusequipamentos(request: Request):
 
         myDevice_id = central_doc["device_id"]
         
-        lista_de_ips = equipamentos_collection.distinct("ip", {"central_id": myDevice_id})
+        cursor_resultados = equipamentos_collection.find({"central_id": myDevice_id}, {"ip": 1, "mac": 1})
+        lista_cadastrada = list(cursor_resultados)
+        nlist = await asyncio.to_thread(listaIpEqs)
         
-        # 4. Fazer ping em cada IP e coletar o status
-        resultados_ping = []
-        for ip in lista_de_ips:
-            status = "offline"
-            try:
-                # O parâmetro count=1 envia apenas 1 pacote ICMP
-                # O parâmetro timeout=1 define o timeout em segundos
-                # O verbose=False suprime a saída detalhada do ping
-                response = await run_in_threadpool(ping, ip, count=1, timeout=1, verbose=False)
-                # Verifica se há pelo menos uma resposta bem-sucedida
-                if any(r.success for r in response):
-                    log = await run_in_threadpool(yd.payLogin, ip)
-                    if log == 0:
-                        status = "offline"
-                    else:
-                        status = "online"
-                        await run_in_threadpool(yd.logout, ip)
-            except Exception as e:
-                # print(f"Erro ao pingar {ip}: {e}")
-                status = "erro_ping" # Adiciona um status para erros no ping
-            
-            resultados_ping.append({"ip": ip, "status": status})
-            # print(f"Ping para {ip}: {status}")
+        mac_ativo_para_ip = {
+            item['mac']: item['ip'] 
+            for item in nlist
+        }
+        
+        resposta = []
+    
+        # Lista de IDs para updates assíncronos no banco
+        updates_no_banco = []
 
-        # 5. Retornar o status em JSON
-        #return json.dumps(resultados_ping, indent=4) # indent=4 para formatação legível
-        await bdLog("STATUS",request.client,resultados_ping)
-        return respPadrao("SUCCESS",resultados_ping) # indent=4 para formatação legível
+        # 2. Comparação (Loop Único sobre a Lista Cadastrada)
+        
+        for dispositivo_cadastrado in lista_cadastrada:
+            mac_cadastrado = dispositivo_cadastrado['mac']
+            ip_cadastrado = dispositivo_cadastrado['ip']
+            
+            # 2.1. Verifica se o MAC cadastrado está ATIVO na rede
+            if mac_cadastrado in mac_ativo_para_ip:
+                
+                ip_ativo = mac_ativo_para_ip[mac_cadastrado]
+                
+                # 2.1.1. Status: ONLINE
+                
+                if ip_cadastrado == ip_ativo:
+                    # IP Não Mudou
+                    resposta.append({
+                        'ip': ip_cadastrado, 
+                        'mac': mac_cadastrado, 
+                        'status': 'online'
+                    })
+                else:
+                    # IP Mudou: É necessário update no banco de dados (BD)
+                    resposta.append({
+                        'ip': ip_ativo, # Usamos o novo IP na resposta
+                        'mac': mac_cadastrado, 
+                        'status': 'online'
+                    })
+                    
+                    # Coleta a instrução de update para execução em lote
+                    updates_no_banco.append({
+                        'filtro': {'_id': dispositivo_cadastrado['_id']}, 
+                        'novo_ip': ip_ativo
+                    })
+
+            else:
+                # 2.2. Status: OFFLINE
+                # O MAC cadastrado NÃO foi encontrado na lista de dispositivos ativos (nlist)
+                resposta.append({
+                    'ip': ip_cadastrado, 
+                    'mac': mac_cadastrado, 
+                    'status': 'offline'
+                })
+            
+        def executar_updates_bloqueantes(updates):
+            """Executa todos os updates no MongoDB na thread do to_thread."""
+            for update_item in updates:
+                equipamentos_collection.update_one(
+                    update_item['filtro'],
+                    {'$set': {'ip': update_item['novo_ip']}}
+                )
+            return len(updates)
+
+        if updates_no_banco:
+            #print(f"INFO: Executando {len(updates_no_banco)} updates de IP no banco de dados...")
+            
+            # O 'await' espera o término da thread de I/O, mas não bloqueia o Event Loop principal.
+            updates_feitos = await asyncio.to_thread(executar_updates_bloqueantes, updates_no_banco)
+            
+            print(f"INFO: {updates_feitos} IPs atualizados com sucesso no MongoDB.")
+                       
+        await bdLog("STATUS",request.client,resposta)
+        return respPadrao("SUCCESS",resposta) # indent=4 para formatação legível
 
     except Exception as e:
         print(f"Ocorreu um erro geral: {e}")
@@ -430,8 +524,8 @@ async def procurar_eqs(req: str = "vazio"):
     nlist3 = []
 
     #LISTAR IPS DE EQS NA REDE
-    nlist2 = listaIpEqs()
-    nlist2 = list(set(nlist2))
+    nlist2_all = await asyncio.to_thread(listaIpEqs)
+    nlist2 = [item['ip'] for item in nlist2]
     
     #dif = [ip for ip in nlist2 if ip not in nlist]
     client = app.state.mongodb_client
@@ -458,7 +552,7 @@ async def procurar_eqs(req: str = "vazio"):
         ip = response["network"]["ip"]
         name = response["network"]["device_hostname"]
         device_id = response["device_id"]
-        filter_query = {"mac": mac}
+        
         jsno = {
             "mac": mac,
             "ip": ip,
@@ -473,6 +567,8 @@ async def procurar_eqs(req: str = "vazio"):
             "updatedAt": datetime.now(timezone.utc)
         } }
         nlist.append(jsno)
+        
+        filter_query = {"mac": mac}
         resultado = collection.update_one(filter_query, jsno2, upsert=False)
         
         if resultado.modified_count == 0:
