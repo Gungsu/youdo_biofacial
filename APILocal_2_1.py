@@ -525,7 +525,7 @@ async def procurar_eqs(req: str = "vazio"):
 
     #LISTAR IPS DE EQS NA REDE
     nlist2_all = await asyncio.to_thread(listaIpEqs)
-    nlist2 = [item['ip'] for item in nlist2]
+    nlist2 = [item['ip'] for item in nlist2_all]
     
     #dif = [ip for ip in nlist2 if ip not in nlist]
     client = app.state.mongodb_client
