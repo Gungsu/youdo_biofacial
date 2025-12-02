@@ -624,7 +624,7 @@ async def incluir_novo_cadastro_cl(soli: Client):
     
     cadastrodecliente.acessos = acessosDict
     cadastrodecliente.base64 = "none"
-    await bdLog("CAD_CLIENTE","cadastro_cl",soli.model_dump())
+    await bdLog("CAD_CLIENTE","cadastro_cl",soli.dict())
     if errorsCont >= 1 and successCont >= 1:
         return respPadrao("PARSE",{"ERROR": arrayOff, "SUCCESS": cadastrodecliente})
     elif successCont >= 1:
@@ -700,7 +700,7 @@ async def cadastrarBio(soli: Client):
                         respRet.append(resp)
             except:
                 pass
-    await bdLog("CAD_BIO","cad_bio",cada_bio.model_dump())
+    await bdLog("CAD_BIO","cad_bio",cada_bio.dict())
     if contOff>=1:
         return respPadrao("ERROR",arrayOff)
     else:
@@ -749,11 +749,11 @@ async def udate_eq(soli: Equipament):
         ip = updateEQ.ip
         device_hostname = updateEQ.device_hostname
     except:
-        await bdLog("ERROR","cadastro_eq",soli.model_dump())
+        await bdLog("ERROR","cadastro_eq",soli.dict())
         return respPadrao("ERROR","Falta de parametro id, ip ou device_hostname")
 
     if yd.payLogin(ip) == 0:
-        await bdLog("ERROR","cadastro_eq",soli.model_dump())
+        await bdLog("ERROR","cadastro_eq",soli.dict())
         return respPadrao("ERROR","Equipamento nao encontrado")
 
     novo_cadastro = {}
@@ -789,7 +789,7 @@ async def resetEquipament(soli: Equipament):
         return respPadrao("ERROR","Equipamento nao encontrado")
     ### Resetar o equipamento ####
     yd.fabricReset(soli.ip)
-    await bdLog("PUT","fabricReset",soli.model_dump())
+    await bdLog("PUT","fabricReset",soli.dict())
     return respPadrao("SUCCESS", resp)
 
 @app.put("/restartDevice")
@@ -806,7 +806,7 @@ async def restartEquipament(soli: Equipament):
         return respPadrao("ERROR","Equipamento nao encontrado")
     ### Resetar o equipamento ####
     yd.restartDevice(soli.ip)
-    await bdLog("PUT","restartDevice",soli.model_dump())
+    await bdLog("PUT","restartDevice",soli.dict())
     return respPadrao("SUCCESS", resp)
 
 @app.put("/eqInitConfs")
@@ -843,7 +843,7 @@ async def eqInitConfs(soli: Equipament):
     yd.activeSensor(soli.ip,"1","5")
     #yd.setwebaccess(soli.ip,"0")
     yd.logout(ip_loc)
-    await bdLog("PUT","eqInitConfs",soli.model_dump())
+    await bdLog("PUT","eqInitConfs",soli.dict())
     return respPadrao("SUCCESS", resp)
 
 @app.put('/atualiza_cl')
@@ -953,10 +953,10 @@ async def update_cad(soli: Client):
         collection.update_one({"idYD": idYD}, {"$set": {"name": nameCl, "password": passw, "acessos": [{"begin_time": bTime, "end_time": eTime}]}})
     
     if errorsCont>=1:
-        await bdLog("ERROR","atualiza_cl",soli.model_dump())
+        await bdLog("ERROR","atualiza_cl",soli.dict())
         return respPadrao("ERROR",arrayOff)
     else:
-        await bdLog("PUT","atualiza_cl",soli.model_dump())
+        await bdLog("PUT","atualiza_cl",soli.dict())
         return respPadrao("SUCCESS",aceList)
 
 @app.delete('/del_cl_2_1')
@@ -1006,23 +1006,23 @@ async def del_cadastro_cl(soli: Client):
         resp.append(myResp)
         resp.append(arrayOff)
         resp.append(success)
-        await bdLog("PARSE","del_cl_2_1",soli.model_dump())
+        await bdLog("PARSE","del_cl_2_1",soli.dict())
         return respPadrao("PARSE",resp)
     elif errorsCont>=1 and userNencontrado>=1 and successCont==0:
         resp = [{}]
         resp.append(myResp)
         resp.append(arrayOff)
-        await bdLog("ERROR","del_cl_2_1",soli.model_dump())
+        await bdLog("ERROR","del_cl_2_1",soli.dict())
         return respPadrao("ERROR",resp)
     elif successCont>=1:
         resp = [{}]
         resp.append(success)
-        await bdLog("SUCCESS","del_cl_2_1",soli.model_dump())
+        await bdLog("SUCCESS","del_cl_2_1",soli.dict())
         return respPadrao("SUCCESS",resp)
     elif userNencontrado>=1:
         resp = [{}]
         resp.append(myResp)
-        await bdLog("ERROR","del_cl_2_1",soli.model_dump())
+        await bdLog("ERROR","del_cl_2_1",soli.dict())
         return respPadrao("ERROR",resp)
     
 @app.post("/update_vpn_ip")
