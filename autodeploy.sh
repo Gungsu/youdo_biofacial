@@ -4,6 +4,12 @@
 cd /root/youdo_biofacial/
 
 # 2. Forçar a limpeza do ambiente antes de puxar as atualizações
+TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
+
+echo "=================================================="
+echo "DEPLOY INICIADO: $TIMESTAMP"
+echo "=================================================="
+
 echo "Iniciando limpeza forçada do ambiente..."
 
 # Desfaz TODAS as alterações locais não comitadas para a versão do HEAD (último commit)

@@ -978,8 +978,10 @@ async def del_cadastro_cl(soli: Client):
     for porta in cadastrodecliente.acessos:
         ip = porta
         vl = yd.payLogin(ip)
-        if vl:
+        if vl == 1:
             bdUsers = yd.loadUsers(ip)
+            #print(bdUsers)
+            #return respPadrao("SUCCESS",bdUsers)
             userActve = [u for u in bdUsers["users"] if u['registration'] == cadastrodecliente.idYD]
 
             #Em caso de cadastro nao existir no equipamento
