@@ -432,6 +432,7 @@ async def procurar_eqs(req: str = "vazio"):
     #LISTAR IPS DE EQS NA REDE
     nlist2 = listaIpEqs()
     nlist2 = list(set(nlist2))
+    #print(nlist2)
     
     #dif = [ip for ip in nlist2 if ip not in nlist]
     client = app.state.mongodb_client
@@ -440,6 +441,8 @@ async def procurar_eqs(req: str = "vazio"):
     
     for eq in nlist2:
         r = yd.payLogin(eq)
+        print(f"INFO: Tentando conectar ao equipamento {eq}")
+        print(f"INFO: Resultado do login: {r}")
         if r == 0:
             print(f"INFO: Equipamento {eq} offline")
             continue
